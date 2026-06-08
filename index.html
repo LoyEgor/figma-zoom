@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Figma Prototype Zoom</title>
+  <meta name="description" content="Open any Figma prototype as a clean, full-screen presentation that behaves like a real website — pinned header, responsive layout and crisp zoom. Paste a prototype link to start." />
+  <style>
+    :root {
+      color-scheme: light dark;
+      --stage-bg: #f5f6f8;
+      --glass: rgba(28, 28, 30, 0.55);
+      --control: rgba(255, 255, 255, 0.08);
+      --control-hover: rgba(255, 255, 255, 0.15);
+      --accent: #0a84ff;
+      --text: #ffffff;
+      --muted: rgba(255, 255, 255, 0.6);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--stage-bg);
+    }
+
+    body {
+      font-size: 14px;
+    }
+
+    button,
+    a {
+      font: inherit;
+    }
+
+    .stage {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: var(--stage-bg);
+    }
+
+    /*
+      In fullscreen the browser paints a ::backdrop behind the fullscreen element
+      that defaults to BLACK. While Figma re-composites its cross-origin iframe
+      during a page navigation, that black backdrop flashes through for a frame
+      (this is the "black bars" seen only in fullscreen -- there is no backdrop in
+      windowed mode). Painting the backdrop and the fullscreen root the same
+      neutral as the stage means any transient uncovered sliver matches the UI
+      instead of flashing black.
+    */
+    :root:fullscreen,
+    :root:-webkit-full-screen {
+      background: var(--stage-bg);
+    }
+
+    :fullscreen::backdrop {
+      background: var(--stage-bg);
+    }
+
+    :-webkit-full-screen::backdrop {
+      background: var(--stage-bg);
+    }
+
+    /*
+      At 100% the iframe is a plain, untouched embed (width/height: 100%, NO
+      transform, NO will-change) -- exactly like pasting the prototype directly.
+      That avoids the GPU compositing layer that otherwise shows a black backing
+      in fullscreen and flashes black during page transitions.
+
+      Zoom does NOT magnify the bitmap. Instead JS shrinks the iframe to
+      stage/zoom and scales it back up, so Figma sees a narrower viewport and
+      reflows the design (content-scaling=responsive) to fit -- nothing spills off
+      the edges. The transform layer only exists while zoomed in.
+    */
+    .live-frame {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: var(--stage-bg);
+      transform-origin: 0 0;
+    }
+
+    .dock {
+      position: fixed;
+      left: 50%;
+      /* lifted so it clears Figma's own bottom prototype controls (page nav / reset) */
+      bottom: max(42px, calc(env(safe-area-inset-bottom) + 26px));
+      z-index: 10;
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+
+    .dock-panel,
+    .collapsed-toggle {
+      pointer-events: auto;
+    }
+
+    .dock-panel {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px;
+      border-radius: 20px;
+      background: var(--glass);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(30px) saturate(1.4);
+      -webkit-backdrop-filter: blur(30px) saturate(1.4);
+    }
+
+    button,
+    .button-link {
+      min-width: 54px;
+      height: 38px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text);
+      background: var(--control);
+      text-decoration: none;
+      white-space: nowrap;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 130ms ease, color 130ms ease;
+    }
+
+    button:hover,
+    .button-link:hover {
+      background: var(--control-hover);
+    }
+
+    button:focus-visible,
+    .button-link:focus-visible {
+      outline: 2px solid rgba(10, 132, 255, 0.65);
+      outline-offset: 2px;
+    }
+
+    button.active {
+      color: #fff;
+      background: var(--accent);
+      font-weight: 600;
+    }
+
+    .button-link {
+      color: var(--muted);
+    }
+
+    /* gap that separates the scale group from the actions, no visible divider */
+    .actions-start {
+      margin-left: 8px;
+    }
+
+    .collapsed-toggle {
+      display: none;
+      min-width: auto;
+      height: 36px;
+      padding: 0 16px;
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--glass);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(30px) saturate(1.4);
+      -webkit-backdrop-filter: blur(30px) saturate(1.4);
+    }
+
+    body.controls-collapsed .dock-panel {
+      display: none;
+    }
+
+    body.controls-collapsed .collapsed-toggle {
+      display: inline-flex;
+    }
+
+    /* ---- Prototype link editor (top) + empty state ---- */
+    .link-bar {
+      position: fixed;
+      left: 50%;
+      top: max(14px, env(safe-area-inset-top));
+      z-index: 20;
+      width: min(720px, calc(100vw - 28px));
+      transform: translateX(-50%);
+      display: none;
+    }
+
+    body.link-open .link-bar {
+      display: block;
+    }
+
+    /* full-screen catcher under the panel: a click anywhere outside the panel
+       (including over the Figma iframe, whose clicks don't reach the parent) hides it */
+    .link-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 19;
+      display: none;
+    }
+
+    body.link-open .link-overlay {
+      display: block;
+    }
+
+    .link-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 18px;
+      background: var(--glass);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(30px) saturate(1.4);
+      -webkit-backdrop-filter: blur(30px) saturate(1.4);
+    }
+
+    .link-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .link-input-wrap {
+      position: relative;
+      display: flex;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .link-input {
+      width: 100%;
+      height: 38px;
+      padding: 0 34px 0 12px;
+      border: 0;
+      border-radius: 12px;
+      color: var(--text);
+      background: var(--control);
+      font: inherit;
+    }
+
+    .link-input::placeholder {
+      color: var(--muted);
+    }
+
+    .link-input:focus-visible {
+      outline: 2px solid rgba(10, 132, 255, 0.65);
+      outline-offset: 2px;
+    }
+
+    /* clear (×) button inside the input */
+    .link-clear {
+      position: absolute;
+      top: 50%;
+      right: 6px;
+      transform: translateY(-50%);
+      min-width: 0;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border-radius: 999px;
+      font-size: 15px;
+      line-height: 1;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .link-clear:hover {
+      background: rgba(255, 255, 255, 0.22);
+    }
+
+    button.primary {
+      color: #fff;
+      background: var(--accent);
+      font-weight: 600;
+    }
+
+    /* only takes vertical space when it actually has a message (uses [hidden]) */
+    .link-status {
+      padding: 0 2px;
+      font-size: 12px;
+      line-height: 1.25;
+      color: var(--muted);
+      word-break: break-word;
+    }
+
+    .link-status.ok { color: #30d158; }
+    .link-status.error { color: #ff453a; }
+
+    /* Welcome / empty state: a centered card with a short description. Shown when
+       there is no saved link. The dock and the iframe are hidden so only the card
+       is visible; pasting a link removes .no-link and reveals the presenter. */
+    .link-desc { display: none; }
+
+    body.no-link .link-desc { display: block; }
+
+    .link-h1 {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .link-sub {
+      margin-top: 6px;
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .link-hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    body.no-link .live-frame,
+    body.no-link .dock {
+      display: none;
+    }
+
+    body.no-link .link-overlay {
+      display: none;
+    }
+
+    body.no-link .link-bar {
+      display: block;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(520px, calc(100vw - 40px));
+    }
+
+    @media (max-width: 560px) {
+      .dock-panel {
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: calc(100vw - 20px);
+      }
+
+      button,
+      .button-link {
+        min-width: 0;
+        flex: 1 0 auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="stage" id="stage" aria-label="Presentation canvas">
+      <iframe
+        class="live-frame"
+        id="figmaFrame"
+        title="Figma prototype"
+        allowfullscreen
+        allow="fullscreen"
+        loading="eager"
+      ></iframe>
+    </section>
+
+    <div class="link-overlay" id="linkOverlay"></div>
+
+    <section class="link-bar" id="linkBar" aria-label="Prototype link">
+      <div class="link-card">
+        <div class="link-desc">
+          <div class="link-h1">Figma Prototype Zoom</div>
+          <div class="link-sub">Open a Figma prototype as a clean, full-screen presentation that behaves like a real website — pinned header, responsive layout and crisp zoom.</div>
+          <div class="link-hint">Paste a prototype share link below — in Figma: Share → Copy link.</div>
+        </div>
+        <div class="link-row">
+          <div class="link-input-wrap">
+            <input
+              class="link-input"
+              id="linkInput"
+              type="url"
+              inputmode="url"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="Paste a Figma prototype link (figma.com/proto/…)"
+            />
+            <button type="button" class="link-clear" id="linkClear" aria-label="Clear link" title="Clear">×</button>
+          </div>
+          <button type="button" class="primary" id="linkApply">Load</button>
+        </div>
+        <div class="link-status" id="linkStatus" role="status" aria-live="polite" hidden></div>
+      </div>
+    </section>
+
+    <section class="dock" id="dock" aria-label="Presentation controls">
+      <div class="dock-panel" id="dockPanel">
+        <button type="button" data-scale="1">100</button>
+        <button type="button" data-scale="1.1">110</button>
+        <button type="button" data-scale="1.25">125</button>
+        <button type="button" data-scale="1.4">140</button>
+
+        <button type="button" class="actions-start" id="fullscreenButton">Fullscreen</button>
+        <button type="button" id="resetButton">Reset</button>
+        <button type="button" id="linkButton">Link</button>
+        <a class="button-link" id="openFigma" target="_blank" rel="noreferrer">Figma&nbsp;↗</a>
+        <button type="button" id="hideButton">Hide</button>
+      </div>
+
+      <button type="button" class="collapsed-toggle" id="collapsedToggle" aria-label="Show controls">Controls</button>
+    </section>
+  </main>
+
+  <script>
+    // The prototype link is whatever the user pastes; it is persisted in
+    // localStorage and auto-corrected by normalizeFigmaLink(). This is a public
+    // tool, so there is NO baked-in default prototype -- with no saved link the
+    // centered welcome screen is shown until the visitor pastes their own link.
+    const DEFAULT_LINK = "";
+    const STORAGE_KEY = "figma-prototype-zoom";
+
+    const MIN_ZOOM = 1;
+    const MAX_ZOOM = 1.4;
+
+    const state = {
+      zoom: 1,
+      collapsed: false,
+      link: DEFAULT_LINK
+    };
+
+    const stage = document.getElementById("stage");
+    const figmaFrame = document.getElementById("figmaFrame");
+    const fullscreenButton = document.getElementById("fullscreenButton");
+    const resetButton = document.getElementById("resetButton");
+    const openFigma = document.getElementById("openFigma");
+    const hideButton = document.getElementById("hideButton");
+    const collapsedToggle = document.getElementById("collapsedToggle");
+    const linkButton = document.getElementById("linkButton");
+    const linkBar = document.getElementById("linkBar");
+    const linkOverlay = document.getElementById("linkOverlay");
+    const linkInput = document.getElementById("linkInput");
+    const linkApply = document.getElementById("linkApply");
+    const linkClear = document.getElementById("linkClear");
+    const linkStatus = document.getElementById("linkStatus");
+
+    let resizeTimer = 0;
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function loadState() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+        if (Number.isFinite(saved.zoom)) state.zoom = clamp(saved.zoom, MIN_ZOOM, MAX_ZOOM);
+        if (typeof saved.collapsed === "boolean") state.collapsed = saved.collapsed;
+        if (typeof saved.link === "string") state.link = saved.link;
+      } catch (error) {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    }
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        zoom: state.zoom,
+        collapsed: state.collapsed,
+        link: state.link
+      }));
+    }
+
+    function setLinkStatus(message, kind) {
+      if (!message) {
+        // hidden so the card has no empty bottom gap when there's nothing to show
+        linkStatus.hidden = true;
+        linkStatus.textContent = "";
+        linkStatus.className = "link-status";
+        return;
+      }
+      linkStatus.hidden = false;
+      linkStatus.textContent = message;
+      linkStatus.className = "link-status" + (kind ? " " + kind : "");
+    }
+
+    // Accepts ANY Figma proto/design/share link and rewrites it into a correct
+    // embed URL: host -> embed.figma.com/proto, forces scaling=contain +
+    // content-scaling=responsive, adds the embed display params, strips share-only
+    // junk (p=...). Also returns the matching plain proto URL for the Figma button.
+    // Returns { ok:true, embedUrl, protoUrl } or { ok:false, error }.
+    function normalizeFigmaLink(input) {
+      const raw = (input || "").trim();
+      if (!raw) return { ok: false, error: "Paste a Figma prototype link." };
+
+      let u;
+      try { u = new URL(raw); }
+      catch (error) { return { ok: false, error: "That is not a valid URL." }; }
+
+      if (!/(^|\.)figma\.com$/i.test(u.hostname)) {
+        return { ok: false, error: "Not a Figma link — it must be a figma.com URL." };
+      }
+
+      const segs = u.pathname.split("/").filter(Boolean);
+      const typeIdx = segs.findIndex((s) => ["proto", "design", "file", "board", "slides"].includes(s));
+      if (typeIdx === -1 || !segs[typeIdx + 1]) {
+        return { ok: false, error: "Could not find the file key in that link." };
+      }
+
+      let key, name;
+      if (segs[typeIdx + 2] === "branch" && segs[typeIdx + 3]) {
+        key = segs[typeIdx + 3];                  // branch links use the branch key
+        name = segs[typeIdx + 4] || "prototype";
+      } else {
+        key = segs[typeIdx + 1];
+        name = segs[typeIdx + 2] || "prototype";
+      }
+      try { name = encodeURIComponent(decodeURIComponent(name)); } catch (error) { name = "prototype"; }
+
+      const embed = new URLSearchParams(u.search);
+      embed.set("scaling", "contain");
+      embed.set("content-scaling", "responsive");
+      embed.set("footer", "false");
+      embed.set("viewport-controls", "false");
+      embed.set("device-frame", "false");
+      if (!embed.get("embed-host")) embed.set("embed-host", "local-prototype-zoom");
+      embed.delete("p");
+
+      const proto = new URLSearchParams(u.search);
+      ["footer", "viewport-controls", "device-frame", "embed-host", "p"].forEach((k) => proto.delete(k));
+      proto.set("scaling", "contain");
+      proto.set("content-scaling", "responsive");
+
+      return {
+        ok: true,
+        embedUrl: `https://embed.figma.com/proto/${key}/${name}?${embed.toString()}`,
+        protoUrl: `https://www.figma.com/proto/${key}/${name}?${proto.toString()}`
+      };
+    }
+
+    function loadPrototype(rawLink) {
+      const res = normalizeFigmaLink(rawLink);
+      if (!res.ok) return res;
+      figmaFrame.src = res.embedUrl;
+      openFigma.href = res.protoUrl;
+      document.body.classList.remove("no-link");
+      applyLayout();
+      return res;
+    }
+
+    function openEditor() {
+      document.body.classList.add("link-open");
+      linkButton.classList.add("active");   // highlight the dock button while open
+      linkInput.value = state.link || "";
+      setLinkStatus("");
+      linkInput.focus();
+      linkInput.select();
+    }
+
+    function closeEditor() {
+      document.body.classList.remove("link-open");
+      linkButton.classList.remove("active");
+    }
+
+    function clearInput() {
+      linkInput.value = "";
+      setLinkStatus("");
+      linkInput.focus();
+    }
+
+    function applyLink() {
+      const res = loadPrototype(linkInput.value);
+      if (!res.ok) {
+        setLinkStatus(res.error, "error");
+        return;
+      }
+      state.link = linkInput.value.trim();
+      saveState();
+      setLinkStatus("Loaded — link normalized to scaling=contain · responsive.", "ok");
+      setTimeout(closeEditor, 900); // hide the panel after a successful load
+    }
+
+    let refitTimer = 0;
+
+    // Target iframe geometry for the current stage size + zoom.
+    //   zoom = 1  -> iframe == stage (plain, no transform -> no compositing layer).
+    //   zoom > 1  -> iframe == stage / zoom, scaled back up, so Figma gets a
+    //               narrower viewport and re-lays-out responsively to fit.
+    function frameTarget() {
+      const box = stage.getBoundingClientRect();
+      const z = state.zoom;
+      return {
+        z,
+        w: Math.max(1, Math.round(z <= 1 ? box.width : box.width / z)),
+        h: Math.max(1, Math.round(z <= 1 ? box.height : box.height / z))
+      };
+    }
+
+    function writeFrame(w, h, z) {
+      figmaFrame.style.width = `${w}px`;
+      figmaFrame.style.height = `${h}px`;
+      figmaFrame.style.transform = z > 1 ? `scale(${z})` : "";
+      figmaFrame.style.willChange = z > 1 ? "transform" : "";
+    }
+
+    // Figma's embed only re-fits its content when its own window registers a
+    // resize. Setting the size programmatically in one shot doesn't reliably
+    // trigger that (the canvas stays fit to the old size -> black bars). So we
+    // nudge: write a slightly-off size, then the real size ~70ms later. Two
+    // sizes spaced in time read as a genuine resize the embed can't coalesce
+    // away -- the same thing that happens when you drag the browser window edge.
+    function applyLayout() {
+      const t = frameTarget();
+      writeFrame(Math.max(1, t.w - 8), Math.max(1, t.h - 8), t.z);
+      clearTimeout(refitTimer);
+      refitTimer = setTimeout(() => writeFrame(t.w, t.h, t.z), 70);
+    }
+
+    function updateChrome() {
+      document.body.classList.toggle("controls-collapsed", state.collapsed);
+      document.querySelectorAll("[data-scale]").forEach((button) => {
+        button.classList.toggle("active", Number(button.dataset.scale) === Number(state.zoom.toFixed(2)));
+      });
+      fullscreenButton.textContent = document.fullscreenElement ? "Exit full" : "Fullscreen";
+    }
+
+    function setZoom(zoom) {
+      state.zoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+      applyLayout();
+      updateChrome();
+      saveState();
+    }
+
+    document.addEventListener("click", (event) => {
+      const scaleButton = event.target.closest("[data-scale]");
+      if (scaleButton) setZoom(Number(scaleButton.dataset.scale));
+    });
+
+    fullscreenButton.addEventListener("click", async () => {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (error) {
+        /* fullscreen blocked by browser; nothing else to do */
+      }
+    });
+
+    resetButton.addEventListener("click", () => {
+      state.zoom = 1;
+      state.collapsed = false;
+      applyLayout();
+      updateChrome();
+      saveState();
+    });
+
+    hideButton.addEventListener("click", () => {
+      state.collapsed = true;
+      updateChrome();
+      saveState();
+    });
+
+    collapsedToggle.addEventListener("click", () => {
+      state.collapsed = false;
+      updateChrome();
+      saveState();
+    });
+
+    linkButton.addEventListener("click", () => {
+      if (document.body.classList.contains("link-open")) closeEditor();
+      else openEditor();
+    });
+    linkApply.addEventListener("click", applyLink);
+    linkClear.addEventListener("click", clearInput);
+    linkInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); applyLink(); }
+    });
+
+    // Clicking the overlay (anywhere outside the panel) hides it. Using "click"
+    // (not pointerdown) means the overlay receives the event itself, so a click on
+    // the Link button area under it just closes -- it never re-toggles open.
+    linkOverlay.addEventListener("click", closeEditor);
+
+    // The iframe is always sized in px from the stage, so any real change to the
+    // stage size (window resize, fullscreen enter/exit) must recompute + re-fit.
+    // Debounced so it settles once after the size stops changing -- which is also
+    // exactly when the macOS fullscreen animation has finished.
+    const observer = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(applyLayout, 90);
+    });
+    observer.observe(stage);
+
+    // Fullscreen: the macOS animation takes time and the stage may stay narrow
+    // until it ends, so re-fit immediately and again after the animation settles.
+    document.addEventListener("fullscreenchange", () => {
+      updateChrome();
+      applyLayout();
+      setTimeout(applyLayout, 350);
+      setTimeout(applyLayout, 800);
+    });
+
+    loadState();
+    linkInput.value = state.link || "";
+    if (state.link && normalizeFigmaLink(state.link).ok) {
+      loadPrototype(state.link);
+    } else {
+      // no saved link -> centered welcome screen (the .no-link CSS handles layout)
+      figmaFrame.removeAttribute("src");
+      document.body.classList.add("no-link");
+      setLinkStatus("");
+      linkInput.focus();
+    }
+    applyLayout();
+    updateChrome();
+  </script>
+</body>
+</html>

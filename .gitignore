@@ -1,0 +1,4 @@
+.DS_Store
+.claude/
+# local-only: frozen original, contains a real prototype link + share token
+figma-prototype-zoom-original.html
