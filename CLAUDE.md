@@ -176,6 +176,7 @@ user in a real browser.** State this honestly rather than claiming a visual fix.
 1. Pages don't jump bigger/smaller when navigating between menu items.
 2. Fullscreen fills the screen, header pinned top, no black bars top/bottom.
 3. Fullscreen → clicking menu items: no "small → big" jump on first visit.
-4. Zoom 100→140 enlarges and reflows; nothing spills off the right/bottom edge.
-5. Zoom 140→100 returns cleanly with no black bars.
+4. Zoom steps are 100 / 125 / 150 / 175; each enlarges and reflows, nothing spills
+   off the right/bottom edge.
+5. Zoom 175→100 returns cleanly with no black bars.
 6. The dock doesn't overlap Figma's own bottom controls.

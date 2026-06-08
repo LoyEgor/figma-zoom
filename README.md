@@ -9,7 +9,7 @@ real website — pinned header, responsive layout, and crisp zoom.
 
 1. In Figma, on a prototype: **Share → Copy link**.
 2. Open the app, paste the link, press **Load**.
-3. Present it: zoom (100–140%), go fullscreen, and click through the prototype
+3. Present it: zoom (100–175%), go fullscreen, and click through the prototype
    like a normal website. Use **Link** (bottom dock) to swap in another prototype.
 
 The link you paste is **auto‑corrected** (loaded as a responsive
