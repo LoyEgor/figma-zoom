@@ -296,32 +296,10 @@
     .link-status.ok { color: #30d158; }
     .link-status.error { color: #ff453a; }
 
-    /* Welcome / empty state: a centered card with a short description. Shown when
-       there is no saved link. The dock and the iframe are hidden so only the card
-       is visible; pasting a link removes .no-link and reveals the presenter. */
-    .link-desc { display: none; }
-
-    body.no-link .link-desc { display: block; }
-
-    .link-h1 {
-      font-size: 19px;
-      font-weight: 700;
-      color: var(--text);
-    }
-
-    .link-sub {
-      margin-top: 6px;
-      font-size: 13px;
-      line-height: 1.45;
-      color: var(--muted);
-    }
-
-    .link-hint {
-      margin-top: 6px;
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.4);
-    }
-
+    /* Welcome / empty state: reuse the SAME top link panel as the normal "Link"
+       editor (no special card). The empty center just shows placeholder-style hint
+       text and a dashed arrow pointing up at that panel. Pasting a link removes
+       .no-link and reveals the presenter. */
     body.no-link .live-frame,
     body.no-link .dock {
       display: none;
@@ -332,10 +310,49 @@
     }
 
     body.no-link .link-bar {
-      display: block;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      width: min(520px, calc(100vw - 40px));
+      display: block; /* the very same top panel as the Link editor, shown by default */
+    }
+
+    .welcome-center {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      padding: 24px;
+      text-align: center;
+      color: rgba(0, 0, 0, 0.34);
+      pointer-events: none;
+    }
+
+    body.no-link .welcome-center {
+      display: flex;
+    }
+
+    .welcome-arrow {
+      color: rgba(0, 0, 0, 0.22);
+    }
+
+    .welcome-text {
+      max-width: 430px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .welcome-text p {
+      margin: 0 0 8px;
+    }
+
+    .welcome-text strong {
+      color: rgba(0, 0, 0, 0.5);
+      font-weight: 600;
+    }
+
+    .welcome-hint {
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.28);
     }
 
     @media (max-width: 560px) {
@@ -364,17 +381,24 @@
         allow="fullscreen"
         loading="eager"
       ></iframe>
+
+      <div class="welcome-center" id="welcomeCenter" aria-hidden="true">
+        <svg class="welcome-arrow" width="36" height="74" viewBox="0 0 36 74" fill="none">
+          <line x1="18" y1="70" x2="18" y2="13" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6" stroke-linecap="round" />
+          <path d="M8 23 L18 9 L28 23" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <div class="welcome-text">
+          <p><strong>Paste a Figma prototype link</strong> in the field above and press Load.</p>
+          <p>It opens as a clean, full-screen presentation — pinned header, responsive layout and crisp zoom — that you click through like a real website.</p>
+          <p class="welcome-hint">Get the link in Figma: Share → Copy link.</p>
+        </div>
+      </div>
     </section>
 
     <div class="link-overlay" id="linkOverlay"></div>
 
     <section class="link-bar" id="linkBar" aria-label="Prototype link">
       <div class="link-card">
-        <div class="link-desc">
-          <div class="link-h1">Figma Prototype Zoom</div>
-          <div class="link-sub">Open a Figma prototype as a clean, full-screen presentation that behaves like a real website — pinned header, responsive layout and crisp zoom.</div>
-          <div class="link-hint">Paste a prototype share link below — in Figma: Share → Copy link.</div>
-        </div>
         <div class="link-row">
           <div class="link-input-wrap">
             <input

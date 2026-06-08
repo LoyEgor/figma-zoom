@@ -8,8 +8,10 @@ Read this whole file before changing `index.html`. The behaviors below were each
 discovered by fixing a concrete bug; reverting any of them brings the bug back.
 
 This is deployed publicly on GitHub Pages, so it ships with NO baked-in prototype
-link (`DEFAULT_LINK = ""`): a fresh visitor sees the centered welcome card and
-pastes their own link.
+link (`DEFAULT_LINK = ""`): a fresh visitor sees the empty state — the SAME top
+link panel as the normal "Link" editor (shown open), plus a centered placeholder-
+style hint and a dashed arrow pointing up at the panel (`.welcome-center`). Pasting
+a link removes `.no-link` and reveals the presenter.
 
 ## Files
 
@@ -92,7 +94,7 @@ https://embed.figma.com/proto/<FILE_KEY>/<FileName>?page-id=<PAGE_ID>&node-id=<N
 The presenter has a **"Link" button** in the dock (next to the "Figma ↗" button)
 that toggles a compact top panel — a single row: a URL input with an inline **×
 clear** button, plus a **Load** button:
-- The pasted link is **persisted** in `localStorage` (key `extended-designs-presenter`,
+- The pasted link is **persisted** in `localStorage` (key `figma-prototype-zoom`,
   field `link`) as the raw string the user typed, and auto-loads next time.
 - On load and on apply, the raw link is run through **`normalizeFigmaLink()`**, which
   applies the whole recipe above automatically (host → embed, force
@@ -111,9 +113,10 @@ clear** button, plus a **Load** button:
   blue state.
 - The status line is `hidden` when empty (no reserved bottom gap); it only appears
   to show an error or the "loaded/normalized" confirmation.
-- `DEFAULT_LINK` (Dashboard) is used only until the user saves their own. The empty
-  state (`about:blank` + hint, editor auto-opened) only shows if the saved link is
-  missing/invalid.
+- `DEFAULT_LINK` is `""` (public tool, no baked-in prototype). With no saved/valid
+  link the empty state shows: `.no-link` on `<body>` hides the iframe + dock, shows
+  the top link panel by default, and reveals `.welcome-center` (centered hint text +
+  dashed up-arrow). It is NOT a separate UI — the link panel is reused as-is.
 - The same `normalizeFigmaLink()` also produces the plain `www.figma.com/proto`
   URL for the "Figma ↗" button.
 
