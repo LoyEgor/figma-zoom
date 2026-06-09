@@ -135,12 +135,25 @@ The presenter currently holds ONE `EMBED_URL`. To support several screens:
 
 ## Zoom, fullscreen and rendering behaviors (don't regress these)
 
-- **Zoom = reflow, not bitmap magnify.** At `zoom > 1` the iframe is sized to
-  `stage / zoom` px and then `transform: scale(zoom)` (origin `0 0`). This gives
-  Figma a *narrower viewport* so it re-lays-out responsively and content stays
-  within the edges. Plain `transform: scale()` on a full-size iframe just
-  magnifies the bitmap and pushes bottom/right elements off-screen — the user
-  explicitly rejected that.
+- **Zoom = reflow, not bitmap magnify.** Steps are **100 / 125 / 150** (MAX_ZOOM
+  `1.5`). At `zoom > 1` the iframe is sized to `stage / zoom` px and then
+  `transform: scale(zoom)` (origin `0 0`). This gives Figma a *narrower viewport*
+  so it re-lays-out responsively and content stays within the edges. Plain
+  `transform: scale()` on a full-size iframe just magnifies the bitmap and pushes
+  bottom/right elements off-screen — the user explicitly rejected that.
+- **Sharp zoom is NOT achievable here — do not re-attempt it.** The prototype is a
+  cross-origin OOPIF; the parent cannot raise its devicePixelRatio or force it to
+  re-render larger, and `content-scaling=responsive` *reflows* on resize instead of
+  scaling (so a full-size iframe doesn't zoom, it just widens + scrolls). So the
+  scale-up softens pixels at high zoom. This is structural, not a bug. Decision
+  (researched + adversarially verified): **accept mild softness**, cap zoom at 150%,
+  and tell users that real crisp magnification is the browser's own ⌘/Ctrl-+.
+  The ONLY way to get truly sharp zoom is `content-scaling=fixed` — but that throws
+  away the responsive "real website" behavior and brings back per-page jumps, so it
+  was rejected. Don't reopen "sharp + responsive": they are mutually exclusive.
+- **The dock has a `Reload` button** (not Reset): it re-assigns the iframe `src`
+  with a `reload=<ts>` cache-bust to pull the latest published version (the embed
+  link always serves latest; there is no token-free way to *detect* an update).
 - **At `zoom == 1` the iframe must be as plain as possible** (no `will-change`,
   the transform cleared). A persistent compositing layer caused black flashes on
   page navigation in windowed mode.
@@ -176,7 +189,7 @@ user in a real browser.** State this honestly rather than claiming a visual fix.
 1. Pages don't jump bigger/smaller when navigating between menu items.
 2. Fullscreen fills the screen, header pinned top, no black bars top/bottom.
 3. Fullscreen → clicking menu items: no "small → big" jump on first visit.
-4. Zoom steps are 100 / 125 / 150 / 175; each enlarges and reflows, nothing spills
-   off the right/bottom edge.
-5. Zoom 175→100 returns cleanly with no black bars.
+4. Zoom steps are 100 / 125 / 150; each enlarges and reflows, nothing spills
+   off the right/bottom edge (mild softness at 150% is expected/accepted).
+5. Zoom 150→100 returns cleanly with no black bars.
 6. The dock doesn't overlap Figma's own bottom controls.

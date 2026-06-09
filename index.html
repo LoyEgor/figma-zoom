@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Figma Prototype Zoom</title>
-  <meta name="description" content="Open any Figma prototype as a clean, full-screen presentation that behaves like a real website — pinned header, responsive layout and crisp zoom. Paste a prototype link to start." />
+  <meta name="description" content="Open any Figma prototype as a clean, full-screen presentation that behaves like a real website — pinned header, responsive layout and smooth zoom. Paste a prototype link to start." />
   <style>
     :root {
       color-scheme: light dark;
@@ -389,8 +389,9 @@
         </svg>
         <div class="welcome-text">
           <p><strong>Paste a Figma prototype link</strong> in the field above and press Load.</p>
-          <p>It opens as a clean, full-screen presentation — pinned header, responsive layout and crisp zoom — that you click through like a real website.</p>
+          <p>It opens as a clean, full-screen presentation — pinned header, responsive layout and smooth zoom — that you click through like a real website.</p>
           <p class="welcome-hint">Get the link in Figma: Share → Copy link.</p>
+          <p class="welcome-hint">Tip: for the crispest magnification, use your browser zoom (⌘/Ctrl&nbsp;+).</p>
         </div>
       </div>
     </section>
@@ -423,10 +424,9 @@
         <button type="button" data-scale="1">100</button>
         <button type="button" data-scale="1.25">125</button>
         <button type="button" data-scale="1.5">150</button>
-        <button type="button" data-scale="1.75">175</button>
 
         <button type="button" class="actions-start" id="fullscreenButton">Fullscreen</button>
-        <button type="button" id="resetButton">Reset</button>
+        <button type="button" id="reloadButton" title="Reload the prototype (pull the latest published version)">Reload</button>
         <button type="button" id="linkButton">Link</button>
         <a class="button-link" id="openFigma" target="_blank" rel="noreferrer">Figma&nbsp;↗</a>
         <button type="button" id="hideButton">Hide</button>
@@ -445,7 +445,7 @@
     const STORAGE_KEY = "figma-prototype-zoom";
 
     const MIN_ZOOM = 1;
-    const MAX_ZOOM = 1.75;
+    const MAX_ZOOM = 1.5;
 
     const state = {
       zoom: 1,
@@ -456,7 +456,7 @@
     const stage = document.getElementById("stage");
     const figmaFrame = document.getElementById("figmaFrame");
     const fullscreenButton = document.getElementById("fullscreenButton");
-    const resetButton = document.getElementById("resetButton");
+    const reloadButton = document.getElementById("reloadButton");
     const openFigma = document.getElementById("openFigma");
     const hideButton = document.getElementById("hideButton");
     const collapsedToggle = document.getElementById("collapsedToggle");
@@ -604,10 +604,13 @@
 
     let refitTimer = 0;
 
-    // Target iframe geometry for the current stage size + zoom.
+    // Target iframe geometry for the current stage size + zoom (reflow zoom):
     //   zoom = 1  -> iframe == stage (plain, no transform -> no compositing layer).
     //   zoom > 1  -> iframe == stage / zoom, scaled back up, so Figma gets a
-    //               narrower viewport and re-lays-out responsively to fit.
+    //               narrower viewport and re-lays-out responsively to fit. NOTE:
+    //               the scale-up softens pixels at high zoom -- this is inherent to
+    //               a cross-origin embed (see CLAUDE.md) and is an accepted trade-off
+    //               for keeping the responsive "real website" behavior.
     function frameTarget() {
       const box = stage.getBoundingClientRect();
       const z = state.zoom;
@@ -622,7 +625,7 @@
       figmaFrame.style.width = `${w}px`;
       figmaFrame.style.height = `${h}px`;
       figmaFrame.style.transform = z > 1 ? `scale(${z})` : "";
-      figmaFrame.style.willChange = z > 1 ? "transform" : "";
+      figmaFrame.style.willChange = ""; // intentionally never set: will-change pins the bitmap and worsens blur
     }
 
     // Figma's embed only re-fits its content when its own window registers a
@@ -670,13 +673,19 @@
       }
     });
 
-    resetButton.addEventListener("click", () => {
-      state.zoom = 1;
-      state.collapsed = false;
+    // Reload re-pulls the prototype. The embed link always serves the latest
+    // published version, so re-assigning src (with a cache-bust) fetches a fresh copy.
+    function reloadPrototype() {
+      if (!state.link) return;
+      const res = normalizeFigmaLink(state.link);
+      if (!res.ok) return;
+      const sep = res.embedUrl.includes("?") ? "&" : "?";
+      figmaFrame.src = res.embedUrl + sep + "reload=" + Date.now();
+      openFigma.href = res.protoUrl;
       applyLayout();
-      updateChrome();
-      saveState();
-    });
+    }
+
+    reloadButton.addEventListener("click", reloadPrototype);
 
     hideButton.addEventListener("click", () => {
       state.collapsed = true;
